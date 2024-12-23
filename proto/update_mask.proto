@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package linearize;
+
+option go_package = "github.com/fgrzl/linearize"; 
+
+// Represents a field that can hold either a single integer or a nested array of integers
+message UpdateMask {
+  // A field that can be a single integer or a nested array of UpdateMask
+  oneof value {
+    // A single integer
+    int32 single = 1;             
+
+    // A nested array of UpdateMask, allowing deep nesting
+    NestedUpdateMask multiple = 2;
+  }
+}
+
+// Holds a repeated list of UpdateMask, enabling deep nesting of arrays
+message NestedUpdateMask {
+  // A list of UpdateMask, allowing recursive nesting
+  repeated UpdateMask values = 1;
+}
+

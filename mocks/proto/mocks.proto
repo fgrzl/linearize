@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package mocks;
+
+option go_package = "github.com/fgrzl/linearize/mocks"; 
+
+message Simple {
+  string Field1 = 1;
+  int32 Field2 = 2;
+  repeated string Repeated = 4;
+}
+
+message Complex {
+  string Field1 = 1;
+  int32 Field2 = 2;
+  Simple Nested = 3;
+  repeated Simple Repeated = 4;
+  map<string, Simple> Map = 5;
+}
+
