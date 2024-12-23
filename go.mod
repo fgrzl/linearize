@@ -2,7 +2,7 @@ module github.com/fgrzl/linearize
 
 go 1.23.4
 
-require google.golang.org/protobuf v1.36.0
+require google.golang.org/protobuf v1.36.1
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
