@@ -59,7 +59,7 @@ func TestLinearizeEdgeCases(t *testing.T) {
 
 		result, err := linearize.Linearize(message)
 		assert.NoError(t, err)
-		assert.Equal(t, expected, result)
+		assert.EqualValues(t, expected, result)
 	})
 
 	t.Run("Complex message with map fields", func(t *testing.T) {
@@ -91,7 +91,7 @@ func TestDiffEdgeCases(t *testing.T) {
 		_, _, mask := linearize.Diff(previous, latest)
 
 		assert.Len(t, mask, 1)
-		assert.Equal(t, int32(2), mask[0].GetSingle())
+		assert.EqualValues(t, int32(2), mask[0].GetSingle())
 	})
 
 	t.Run("Detect changes in nested fields", func(t *testing.T) {
