@@ -1,170 +1,192 @@
-package linearize_test
+package linearize
 
 import (
 	"testing"
 
-	"github.com/fgrzl/linearize"
 	"github.com/fgrzl/linearize/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestLinearizeEdgeCases(t *testing.T) {
-	t.Run("Simple message with all fields populated", func(t *testing.T) {
-		message := &mocks.Simple{
-			Field1:   "Test",
-			Field2:   42,
-			Repeated: []string{"one", "two", "three"},
-		}
-		expected := linearize.LinearizedData{
-			"Test", int32(42),
-			[]interface{}{"one", "two", "three"},
-		}
+// Test for Linearize, Unlinearize, Diff, and Merge functions
+func TestLinearize(t *testing.T) {
 
-		result, err := linearize.Linearize(message)
+	// Test Linearize and Unlinearize Simple Message
+	t.Run("Linearize and Unlinearize Simple Message", func(t *testing.T) {
+		// Arrange
+		msg := mocks.CreateSimpleMessage()
+		linearized, err := Linearize(msg)
 		assert.NoError(t, err)
-		assert.Equal(t, expected, result)
-	})
 
-	t.Run("Simple message with empty fields", func(t *testing.T) {
-		message := &mocks.Simple{}
-		expected := linearize.LinearizedData{"", int32(0), nil}
+		// Act
+		unlinearized, err := Unlinearize[*mocks.Simple](linearized)
 
-		result, err := linearize.Linearize(message)
+		// Assert
 		assert.NoError(t, err)
-		assert.Equal(t, expected, result)
+		assert.Equal(t, msg.Field1, unlinearized.Field1)
+		assert.Equal(t, msg.Field2, unlinearized.Field2)
+		assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
 	})
 
-	t.Run("Complex message with nested and repeated fields", func(t *testing.T) {
-		message := &mocks.Complex{
-			Field1: "Parent",
-			Field2: 99,
-			Nested: &mocks.Simple{
-				Field1: "Child",
-				Field2: 42,
-			},
-			Repeated: []*mocks.Simple{
-				{Field1: "Repeated1", Field2: 1},
-				{Field1: "Repeated2", Field2: 2},
-			},
-		}
-		expected := linearize.LinearizedData{
-			"Parent", int32(99),
-			linearize.LinearizedData{"Child", int32(42), nil},
-			[]interface{}{
-				linearize.LinearizedData{"Repeated1", int32(1), nil},
-				linearize.LinearizedData{"Repeated2", int32(2), nil},
-			},
-			nil,
-		}
-
-		result, err := linearize.Linearize(message)
+	// Test Linearize and Unlinearize Complex Message
+	t.Run("Linearize and Unlinearize Complex Message", func(t *testing.T) {
+		// Arrange
+		msg := mocks.CreateComplexMessage()
+		linearized, err := Linearize(msg)
 		assert.NoError(t, err)
-		assert.EqualValues(t, expected, result)
-	})
 
-	t.Run("Complex message with map fields", func(t *testing.T) {
-		message := &mocks.Complex{
-			Map: map[string]*mocks.Simple{
-				"key1": {Field1: "MapValue1", Field2: 11},
-				"key2": {Field1: "MapValue2", Field2: 22},
-			},
-		}
-		expected := linearize.LinearizedData{
-			"", int32(0), nil, nil,
-			map[string]interface{}{
-				"key1": linearize.LinearizedData{"MapValue1", int32(11), nil},
-				"key2": linearize.LinearizedData{"MapValue2", int32(22), nil},
-			},
-		}
+		// Act
+		unlinearized, err := Unlinearize[*mocks.Complex](linearized)
 
-		result, err := linearize.Linearize(message)
+		// Assert
 		assert.NoError(t, err)
-		assert.Equal(t, expected, result)
-	})
-}
-
-func TestDiffEdgeCases(t *testing.T) {
-	t.Run("Detect changes in repeated fields", func(t *testing.T) {
-		previous := linearize.LinearizedData{"Test", int32(42), []interface{}{"one", "two"}}
-		latest := linearize.LinearizedData{"Test", int32(42), []interface{}{"one", "three"}}
-
-		_, _, mask := linearize.Diff(previous, latest)
-
-		assert.Len(t, mask, 1)
-		assert.EqualValues(t, int32(2), mask[0].GetSingle())
+		assert.Equal(t, msg.Field1, unlinearized.Field1)
+		assert.Equal(t, msg.Field2, unlinearized.Field2)
+		assert.Equal(t, msg.Nested.Field1, unlinearized.Nested.Field1)
+		assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
+		assert.ElementsMatch(t, msg.Map["key1"].Repeated, unlinearized.Map["key1"].Repeated)
 	})
 
-	t.Run("Detect changes in nested fields", func(t *testing.T) {
-		previous := linearize.LinearizedData{
-			"Parent", int32(99),
-			linearize.LinearizedData{"Child", int32(42), nil},
-			nil, nil,
-		}
-		latest := linearize.LinearizedData{
-			"Parent", int32(99),
-			linearize.LinearizedData{"Child", int32(43), nil},
-			nil, nil,
-		}
+	// Test Linearize and Unlinearize Empty Linearized Data
+	t.Run("Linearize and Unlinearize Empty Linearized Data", func(t *testing.T) {
+		// Arrange
+		var emptyLinearized LinearizedObject
 
-		_, _, mask := linearize.Diff(previous, latest)
+		// Act
+		unlinearized, err := Unlinearize[*mocks.Simple](emptyLinearized)
 
-		assert.Len(t, mask, 1)
-		assert.Equal(t, int32(2), mask[0].GetSingle())
+		// Assert
+		assert.Error(t, err)
+		assert.Nil(t, unlinearized)
 	})
 
-	t.Run("Detect map field updates", func(t *testing.T) {
-		previous := linearize.LinearizedData{
-			"", int32(0), nil, nil,
-			map[string]interface{}{
-				"key1": linearize.LinearizedData{"MapValue1", int32(11), nil},
-			},
-		}
-		latest := linearize.LinearizedData{
-			"", int32(0), nil, nil,
-			map[string]interface{}{
-				"key1": linearize.LinearizedData{"UpdatedMapValue", int32(11), nil},
-			},
+	// Test Linearize and Unlinearize Invalid Data Structure
+	t.Run("Linearize and Unlinearize Invalid Data Structure", func(t *testing.T) {
+		// Arrange
+		linearized := LinearizedObject{
+			1: "test",
+			2: 123,
 		}
 
-		_, _, mask := linearize.Diff(previous, latest)
+		// Act
+		unlinearized, err := Unlinearize[*mocks.Complex](linearized)
 
-		assert.Len(t, mask, 1)
-		assert.Equal(t, int32(4), mask[0].GetSingle())
-	})
-}
-
-func TestMergeEdgeCases(t *testing.T) {
-	t.Run("Apply updates to repeated fields", func(t *testing.T) {
-		updateMask := []*linearize.UpdateMask{
-			{Value: &linearize.UpdateMask_Single{Single: 2}},
-		}
-		previous := linearize.LinearizedData{"Test", int32(42), []interface{}{"one", "two"}}
-		latest := linearize.LinearizedData{"Test", int32(42), []interface{}{"one", "three"}}
-
-		result := linearize.Merge(updateMask, previous, latest)
-
-		assert.Equal(t, latest, result)
+		// Assert
+		assert.Error(t, err)
+		assert.Nil(t, unlinearized)
 	})
 
-	t.Run("Apply updates to map fields", func(t *testing.T) {
-		updateMask := []*linearize.UpdateMask{
-			{Value: &linearize.UpdateMask_Single{Single: 4}},
-		}
-		previous := linearize.LinearizedData{
-			"", int32(0), nil, nil,
-			map[string]interface{}{
-				"key1": linearize.LinearizedData{"MapValue1", int32(11), nil},
-			},
-		}
-		latest := linearize.LinearizedData{
-			"", int32(0), nil, nil,
-			map[string]interface{}{
-				"key1": linearize.LinearizedData{"UpdatedMapValue", int32(11), nil},
-			},
-		}
+	// Test Linearize and Unlinearize with Missing Fields
+	t.Run("Linearize and Unlinearize with Missing Fields", func(t *testing.T) {
+		// Arrange
+		msg := mocks.CreateSimpleMessage()
+		linearized, err := Linearize(msg)
+		assert.NoError(t, err)
 
-		result := linearize.Merge(updateMask, previous, latest)
+		// Remove one field (simulating a missing field in LinearizedObject)
+		delete(linearized, 2) // Remove Field2
 
-		assert.Equal(t, latest, result)
+		// Act
+		unlinearized, err := Unlinearize[*mocks.Simple](linearized)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.Equal(t, msg.Field1, unlinearized.Field1)
+		assert.Equal(t, int32(0), unlinearized.Field2) // Default value since Field2 was missing
+		assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
+	})
+
+	// Test Linearize and Unlinearize with Nested Map
+	t.Run("Linearize and Unlinearize with Nested Map", func(t *testing.T) {
+		// Arrange
+		msg := mocks.CreateComplexMessage()
+		linearized, err := Linearize(msg)
+		assert.NoError(t, err)
+
+		// Act
+		unlinearized, err := Unlinearize[*mocks.Complex](linearized)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.Equal(t, msg.Field1, unlinearized.Field1)
+		assert.Equal(t, msg.Field2, unlinearized.Field2)
+		assert.Equal(t, msg.Nested.Field1, unlinearized.Nested.Field1)
+		assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
+		assert.ElementsMatch(t, msg.Map["key1"].Repeated, unlinearized.Map["key1"].Repeated)
+	})
+
+	// Test Linearize and Unlinearize with Empty Map
+	t.Run("Linearize and Unlinearize with Empty Map", func(t *testing.T) {
+		// Arrange
+		msg := &mocks.Complex{
+			Field1: "complex_field1",
+			Field2: 100,
+			Map:    map[string]*mocks.Simple{}, // Empty map
+		}
+		linearized, err := Linearize(msg)
+		assert.NoError(t, err)
+
+		// Act
+		unlinearized, err := Unlinearize[*mocks.Complex](linearized)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.Equal(t, msg.Field1, unlinearized.Field1)
+		assert.Equal(t, msg.Field2, unlinearized.Field2)
+		assert.Len(t, unlinearized.Map, 0) // Empty map
+	})
+
+	// Test Diff - Detecting changes between two LinearizedObject
+	t.Run("Diff Identifies Changes Between LinearizedObject", func(t *testing.T) {
+		// Arrange
+		previous := mocks.CreateComplexMessage()
+		latest := mocks.CreateComplexMessage()
+
+		// Modify some fields in latest
+		latest.Field1 = "updated_field1"
+		latest.Map["key1"].Field1 = "updated_key1"
+
+		linearizedPrev, err := Linearize(previous)
+		assert.NoError(t, err)
+
+		linearizedLatest, err := Linearize(latest)
+		assert.NoError(t, err)
+
+		// Act
+		_, after, mask, err := Diff(linearizedPrev, linearizedLatest)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.Equal(t, "updated_field1", after[1]) // Updated Field1
+		assert.Equal(t, "updated_key1", after[5])   // Updated Map["key1"]
+		assert.Len(t, mask, 2)                      // Two changes should be present in the mask
+	})
+
+	// Test Merge - Merging changes into the latest LinearizedObject
+	t.Run("Merge Applies Changes Correctly", func(t *testing.T) {
+		// Arrange
+		previous := mocks.CreateComplexMessage()
+		latest := mocks.CreateComplexMessage()
+
+		// Modify some fields in latest
+		latest.Field1 = "updated_field1"
+		latest.Map["key1"].Field1 = "updated_key1"
+
+		linearizedPrev, err := Linearize(previous)
+		assert.NoError(t, err)
+
+		linearizedLatest, err := Linearize(latest)
+		assert.NoError(t, err)
+
+		_, _, mask, err := Diff(linearizedPrev, linearizedLatest)
+		require.NoError(t, err)
+
+		// Act
+		merged := Merge(mask, linearizedPrev, linearizedLatest)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.Equal(t, "updated_field1", merged[1]) // Updated Field1
+		assert.Equal(t, "updated_key1", merged[5])   // Updated Map["key1"]
 	})
 }

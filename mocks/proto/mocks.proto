@@ -7,7 +7,7 @@ option go_package = "github.com/fgrzl/linearize/mocks";
 message Simple {
   string Field1 = 1;
   int32 Field2 = 2;
-  repeated string Repeated = 4;
+  repeated string Repeated = 3;
 }
 
 message Complex {
