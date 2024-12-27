@@ -98,17 +98,6 @@ func TestSimple(t *testing.T) {
 		assert.NotNil(t, before)
 		assert.NotNil(t, after)
 		assert.NotNil(t, mask)
-
-		// // Verify that the mask contains the fields that have changed
-		// assert.Contains(t, mask, &UpdateMask{
-		// 	Value: &UpdateMask_Single{Single: 1}, // Field1 has changed (using field number 1)
-		// })
-		// assert.Contains(t, mask, &UpdateMask{
-		// 	Value: &UpdateMask_Single{Single: 2}, // Field2 has changed (using field number 2)
-		// })
-		// assert.Contains(t, mask, &UpdateMask{
-		// 	Value: &UpdateMask_Single{Single: 3}, // Repeated has changed (using field number 3)
-		// })
 	})
 
 	t.Run("should merge messages using update mask", func(t *testing.T) {
@@ -121,13 +110,11 @@ func TestSimple(t *testing.T) {
 		}
 
 		linearized1, err := Linearize(msg1)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		linearized2, err := Linearize(msg2)
-		assert.NoError(t, err)
-
-		// Act: Diff to get the update mask
+		require.NoError(t, err)
 		_, _, mask, err := Diff(linearized1, linearized2)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// Act: Merge the second linearized message into the first using the update mask
 		merged, err := Merge(mask, linearized1, linearized2)

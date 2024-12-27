@@ -20,13 +20,7 @@ func Merge(mask *UpdateMask, current LinearizedObject, diff LinearizedObject) (L
 		// Cast the key to int32 to match the map type
 		intKey := int32(key)
 
-		// Handle the case for none mask value
-		if maskValue.GetEmpty() != nil {
-			// Apply the single value from the update
-			if updateVal, ok := diff[intKey]; ok {
-				mergedObject[intKey] = updateVal
-			}
-		} else if nestedMask := maskValue.GetMultiple(); nestedMask != nil {
+		if nestedMask := maskValue.GetMultiple(); nestedMask != nil {
 			// Handle the case where there are multiple values (nested)
 			if existingVal, ok := current[intKey]; ok {
 				// Case 1: If the existing value is a LinearizedMap, merge it as a map
@@ -59,13 +53,14 @@ func Merge(mask *UpdateMask, current LinearizedObject, diff LinearizedObject) (L
 					// If the existing value is neither a map nor array, return an error
 					return nil, fmt.Errorf("expected LinearizedMap or LinearizedArray at key %v", key)
 				}
-			} else {
-				// If there is no value in the existing object, just apply the update
-				if updateVal, ok := diff[intKey]; ok {
-					mergedObject[intKey] = updateVal
-				}
+			}
+		} else {
+			// If there is no value in the existing object, just apply the update
+			if updateVal, ok := diff[intKey]; ok {
+				mergedObject[intKey] = updateVal
 			}
 		}
+
 	}
 
 	// Return the merged object
@@ -92,18 +87,8 @@ func mergeArrays(mask *UpdateMask, current LinearizedArray, diff LinearizedArray
 				mergedArray = append(mergedArray, nil)
 			}
 		}
-
-		// Apply single value updates
-		if maskValue.GetEmpty() != nil {
-			// Check if the updateArray has a corresponding value
-			if pos < len(diff) {
-				mergedArray[pos] = diff[pos]
-			} else {
-				// If the updateArray has no value at `pos`, treat it as a removal
-				mergedArray = append(mergedArray[:pos], mergedArray[pos+1:]...)
-			}
-		} else if nestedMask := maskValue.GetMultiple(); nestedMask != nil {
-			// Handle nested updates recursively
+		nestedMask := maskValue.GetMultiple()
+		if nestedMask != nil {
 
 			switch existingItem := mergedArray[pos].(type) {
 			case LinearizedObject:
@@ -145,7 +130,13 @@ func mergeArrays(mask *UpdateMask, current LinearizedArray, diff LinearizedArray
 			default:
 				return nil, fmt.Errorf("unexpected type at position %d", pos)
 			}
+		} else {
+			// Apply the single value update
+			if updateVal := diff[pos]; updateVal != nil {
+				mergedArray[pos] = updateVal
+			}
 		}
+
 	}
 
 	// Return the merged array
