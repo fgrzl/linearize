@@ -1,27 +1,22 @@
 syntax = "proto3";
 
-import "google/protobuf/empty.proto";
 
 package linearize;
 
 option go_package = "github.com/fgrzl/linearize"; 
 
-// Represents a field that can hold either a single integer or a nested array of integers
+
 message UpdateMask {
-
   map<int32, UpdateMaskValue> values = 1;
-
 }
 
-// Holds a repeated list of UpdateMask, enabling deep nesting of arrays
 message UpdateMaskValue {
-  // A field that can be a single integer or a nested array of UpdateMask
-  oneof value {
-    // A empty struct
-    google.protobuf.Empty  empty = 1;             
-
-    // A nested array of UpdateMask, allowing deep nesting
-    UpdateMask multiple = 2;
-  }
+   UpdateMask masks = 1;
+   UpdateMaskOperation op = 2;
 }
 
+enum UpdateMaskOperation {
+  ADD = 0;
+  UPDATE = 1;
+  REMOVE = 2;
+}

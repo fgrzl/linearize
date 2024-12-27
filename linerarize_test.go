@@ -28,6 +28,7 @@ func TestSimple(t *testing.T) {
 
 	t.Run("should return empty message given empty linearized object", func(t *testing.T) {
 		// Arrange
+		msg := &mocks.Simple{}
 		var emptyLinearized LinearizedObject
 
 		// Act: Attempt to unlinearize an empty structure
@@ -36,7 +37,10 @@ func TestSimple(t *testing.T) {
 
 		// Assert: Ensure an error is returned due to the empty data
 		assert.NoError(t, err)
-		assert.Empty(t, &unlinearized)
+		assert.NoError(t, err)
+		assert.Equal(t, msg.Field1, unlinearized.Field1)
+		assert.Equal(t, int32(0), unlinearized.Field2) // Default value for missing Field2
+		assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
 	})
 
 	t.Run("should unlinearize partial message", func(t *testing.T) {
@@ -107,6 +111,56 @@ func TestSimple(t *testing.T) {
 			Field1:   "changed_field1", // Modify some fields
 			Field2:   200,
 			Repeated: []string{"item3", "item4"},
+		}
+
+		linearized1, err := Linearize(msg1)
+		require.NoError(t, err)
+		linearized2, err := Linearize(msg2)
+		require.NoError(t, err)
+		_, _, mask, err := Diff(linearized1, linearized2)
+		require.NoError(t, err)
+
+		// Act: Merge the second linearized message into the first using the update mask
+		merged, err := Merge(mask, linearized1, linearized2)
+
+		// Assert: Verify that the merged result contains both the changes from msg2 and msg1
+		assert.Equal(t, msg2.Field1, merged[1])
+		assert.Equal(t, msg2.Field2, merged[2])
+		assert.ElementsMatch(t, msg2.Repeated, merged[3])
+	})
+
+	t.Run("should merge messages using update mask when array grows", func(t *testing.T) {
+		// Arrange: Create two different messages
+		msg1 := mocks.CreateSimpleMessage()
+		msg2 := &mocks.Simple{
+			Field1:   "changed_field1", // Modify some fields
+			Field2:   200,
+			Repeated: []string{"value1", "value2", "item3", "item4"},
+		}
+
+		linearized1, err := Linearize(msg1)
+		require.NoError(t, err)
+		linearized2, err := Linearize(msg2)
+		require.NoError(t, err)
+		_, _, mask, err := Diff(linearized1, linearized2)
+		require.NoError(t, err)
+
+		// Act: Merge the second linearized message into the first using the update mask
+		merged, err := Merge(mask, linearized1, linearized2)
+
+		// Assert: Verify that the merged result contains both the changes from msg2 and msg1
+		assert.Equal(t, msg2.Field1, merged[1])
+		assert.Equal(t, msg2.Field2, merged[2])
+		assert.ElementsMatch(t, msg2.Repeated, merged[3])
+	})
+
+	t.Run("should merge messages using update mask when array shrinks", func(t *testing.T) {
+		// Arrange: Create two different messages
+		msg1 := mocks.CreateSimpleMessage()
+		msg2 := &mocks.Simple{
+			Field1:   "changed_field1", // Modify some fields
+			Field2:   200,
+			Repeated: []string{"item1"},
 		}
 
 		linearized1, err := Linearize(msg1)

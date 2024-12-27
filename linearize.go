@@ -24,7 +24,7 @@ func Linearize(message proto.Message) (LinearizedObject, error) {
 
 	// Iterate over the fields of the message
 	msgReflect.Range(func(fd protoreflect.FieldDescriptor, value protoreflect.Value) bool {
-		key := int32(fd.Number()) // Use field number as the key
+		key := int32(fd.Number())
 
 		// Handle map fields
 		if fd.IsMap() {
@@ -43,6 +43,7 @@ func Linearize(message proto.Message) (LinearizedObject, error) {
 				return true
 			})
 
+			// Sort by CRC32 hash to ensure consistent ordering
 			sort.Slice(keys, func(i, j int) bool {
 				return keys[i].CRC32 < keys[j].CRC32
 			})
@@ -61,17 +62,18 @@ func Linearize(message proto.Message) (LinearizedObject, error) {
 					if err != nil {
 						return false
 					}
-					mapValue = append(mapValue, [2]any{keyInterface, nestedResult})
+					mapValue[int32(len(mapValue))] = [2]any{keyInterface, nestedResult}
 				} else {
 					// Handle primitive types
-					mapValue = append(mapValue, [2]any{keyInterface, mapVal.Interface()})
+					mapValue[int32(len(mapValue))] = [2]any{keyInterface, mapVal.Interface()}
 				}
 			}
 
 			linearized[key] = mapValue
 		} else if fd.IsList() {
 			// Handle repeated fields (lists)
-			var list LinearizedArray
+			list := make(LinearizedSlice)
+
 			for i := 0; i < value.List().Len(); i++ {
 				elem := value.List().Get(i)
 
@@ -86,13 +88,14 @@ func Linearize(message proto.Message) (LinearizedObject, error) {
 					if err != nil {
 						return false
 					}
-					list = append(list, nestedResult)
+					list[int32(i)] = nestedResult // Use index as the key in LinearizedSlice
 				} else {
 					// Append primitive types directly
-					list = append(list, elem.Interface())
+					list[int32(i)] = elem.Interface() // Use index as the key in LinearizedSlice
 				}
 			}
 			linearized[key] = list
+
 		} else if fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind {
 			// Recursively handle nested messages
 			nestedMessage := value.Message().Interface()
@@ -113,31 +116,39 @@ func Linearize(message proto.Message) (LinearizedObject, error) {
 
 // Unlinearize function for decoding LinearizedObject into the correct struct type
 func Unlinearize(m LinearizedObject, message proto.Message) error {
+	// Ensure the message is a pointer to a struct
 	v := reflect.ValueOf(message)
 	if v.Kind() != reflect.Ptr || v.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("result must be a pointer to a struct")
 	}
-	return unlinearizeStruct(v.Elem(), m)
+
+	// Get the message descriptor for the Protobuf message
+	msgReflect := message.ProtoReflect().Descriptor()
+
+	// Call the recursive unlinearize function with the message descriptor
+	return unlinearizeStruct(v.Elem(), m, msgReflect)
 }
 
-func unlinearizeStruct(v reflect.Value, data LinearizedObject) error {
+func unlinearizeStruct(v reflect.Value, data LinearizedObject, msgReflect protoreflect.MessageDescriptor) error {
 	// Iterate through the LinearizedObject by position and set the corresponding fields in the struct
 	for i, d := range data {
-		pos := int(i)
-		// Get the struct field at the given position
-		if pos >= v.NumField() {
-			return fmt.Errorf("invalid position %d: exceeds struct field count", i)
+		fd := msgReflect.Fields().ByNumber(protoreflect.FieldNumber(i))
+		if fd == nil {
+			return fmt.Errorf("field number %d not found in the message", i)
 		}
 
-		// Get the field by position (using v.Field(pos))
-		field := v.Field(pos)
+		// Get the field name and number for correct mapping
+		fieldName := string(fd.Name())
+
+		// Find the struct field corresponding to this descriptor
+		field := v.FieldByName(fieldName)
 		if !field.IsValid() {
-			return fmt.Errorf("invalid field for position: %d", i)
+			return fmt.Errorf("invalid field name: %s", fieldName)
 		}
 
 		// Ensure the field is addressable (can be set)
 		if !field.CanSet() {
-			return fmt.Errorf("field at position %d cannot be set", i)
+			return fmt.Errorf("field %s cannot be set", fieldName)
 		}
 
 		// Handle the field depending on its type
@@ -150,14 +161,14 @@ func unlinearizeStruct(v reflect.Value, data LinearizedObject) error {
 				}
 				field = field.Elem()
 			}
-			if err := unlinearizeStruct(field, value); err != nil {
+			if err := unlinearizeStruct(field, value, fd.Message()); err != nil {
 				return err
 			}
 
-		case LinearizedArray:
+		case LinearizedSlice:
 			// Handle repeated fields (slices)
 			if field.Kind() != reflect.Slice {
-				return fmt.Errorf("expected slice field at position %d, but got %s", i, field.Kind())
+				return fmt.Errorf("expected slice field %s, but got %s", fieldName, field.Kind())
 			}
 			if field.IsNil() {
 				field.Set(reflect.MakeSlice(field.Type(), len(value), len(value)))
@@ -165,7 +176,7 @@ func unlinearizeStruct(v reflect.Value, data LinearizedObject) error {
 
 			// Iterate over the LinearizedArray elements
 			for j, elem := range value {
-				elemValue := field.Index(j)
+				elemValue := field.Index(int(j))
 
 				if elemStruct, ok := elem.(LinearizedObject); ok {
 					// Handle struct or pointer to struct
@@ -175,12 +186,12 @@ func unlinearizeStruct(v reflect.Value, data LinearizedObject) error {
 							elemValue.Set(reflect.New(elemValue.Type().Elem()))
 						}
 						// Recursively populate the struct
-						if err := unlinearizeStruct(elemValue.Elem(), elemStruct); err != nil {
+						if err := unlinearizeStruct(elemValue.Elem(), elemStruct, msgReflect); err != nil {
 							return fmt.Errorf("failed to unlinearize struct in slice at index %d: %w", j, err)
 						}
 					} else if elemValue.Kind() == reflect.Struct {
 						// Directly populate the struct
-						if err := unlinearizeStruct(elemValue, elemStruct); err != nil {
+						if err := unlinearizeStruct(elemValue, elemStruct, msgReflect); err != nil {
 							return fmt.Errorf("failed to unlinearize struct in slice at index %d: %w", j, err)
 						}
 					} else {
@@ -208,7 +219,7 @@ func unlinearizeStruct(v reflect.Value, data LinearizedObject) error {
 		case LinearizedMap:
 			// Handle map fields
 			if field.Kind() != reflect.Map {
-				return fmt.Errorf("expected map field at position %d, but got %s", i, field.Kind())
+				return fmt.Errorf("expected map field %s, but got %s", fieldName, field.Kind())
 			}
 			// Initialize the map if it's a pointer and nil
 			if field.Kind() == reflect.Ptr && field.IsNil() {
@@ -222,7 +233,7 @@ func unlinearizeStruct(v reflect.Value, data LinearizedObject) error {
 		default:
 			// Handle primitive fields
 			if field.Kind() != reflect.TypeOf(value).Kind() {
-				return fmt.Errorf("expected %s field at position %d, but got %s", reflect.TypeOf(value).Kind(), i, field.Kind())
+				return fmt.Errorf("expected %s field %s, but got %s", reflect.TypeOf(value).Kind(), fieldName, field.Kind())
 			}
 			field.Set(reflect.ValueOf(value))
 		}

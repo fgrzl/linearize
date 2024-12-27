@@ -14,7 +14,7 @@ func Diff(previous, latest LinearizedObject) (before LinearizedObject, after Lin
 			// If key is removed, mark it for removal in the mask
 			before[key] = prevValue
 			after[key] = nil
-			masks[pos] = &UpdateMaskValue{Value: &UpdateMaskValue_Empty{}}
+			masks[pos] = &UpdateMaskValue{Op: UpdateMaskOperation_REMOVE}
 			continue
 		}
 
@@ -25,9 +25,9 @@ func Diff(previous, latest LinearizedObject) (before LinearizedObject, after Lin
 			after[key] = nestedAfter
 			if nestedMask != nil {
 				// Handle nested mask (it will be a nested UpdateMask)
-				masks[pos] = &UpdateMaskValue{Value: &UpdateMaskValue_Multiple{Multiple: nestedMask}}
+				masks[pos] = &UpdateMaskValue{Op: UpdateMaskOperation_UPDATE, Masks: nestedMask}
 			} else {
-				masks[pos] = &UpdateMaskValue{Value: &UpdateMaskValue_Empty{}}
+				masks[pos] = &UpdateMaskValue{Op: UpdateMaskOperation_UPDATE}
 			}
 		}
 	}
@@ -38,7 +38,7 @@ func Diff(previous, latest LinearizedObject) (before LinearizedObject, after Lin
 		if _, exists := previous[key]; !exists {
 			before[key] = nil
 			after[key] = latestValue
-			masks[pos] = &UpdateMaskValue{Value: &UpdateMaskValue_Empty{}}
+			masks[pos] = &UpdateMaskValue{Op: UpdateMaskOperation_ADD}
 		}
 	}
 
@@ -73,7 +73,7 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 					// Key was removed in the latest object
 					nestedBefore.(LinearizedObject)[key] = prevVal
 					nestedAfter.(LinearizedObject)[key] = nil
-					nestedMask.Values[int32(key)] = &UpdateMaskValue{Value: &UpdateMaskValue_Empty{}}
+					nestedMask.Values[int32(key)] = &UpdateMaskValue{Op: UpdateMaskOperation_REMOVE}
 					changed = true
 					continue
 				}
@@ -88,10 +88,11 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 					// Store the nested mask for this key
 					if elemMask != nil {
 						nestedMask.Values[int32(key)] = &UpdateMaskValue{
-							Value: &UpdateMaskValue_Multiple{Multiple: elemMask},
+							Op:    UpdateMaskOperation_UPDATE,
+							Masks: elemMask,
 						}
 					} else {
-						nestedMask.Values[int32(key)] = &UpdateMaskValue{Value: &UpdateMaskValue_Empty{}}
+						nestedMask.Values[int32(key)] = &UpdateMaskValue{Op: UpdateMaskOperation_UPDATE}
 					}
 				} else {
 					// If no change, keep the existing values
@@ -106,7 +107,7 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 					// If key is new, add it to the after state with an empty before state
 					nestedBefore.(LinearizedObject)[key] = nil
 					nestedAfter.(LinearizedObject)[key] = latestVal
-					nestedMask.Values[int32(key)] = &UpdateMaskValue{Value: &UpdateMaskValue_Empty{}}
+					nestedMask.Values[int32(key)] = &UpdateMaskValue{Op: UpdateMaskOperation_ADD}
 					changed = true
 				}
 			}
@@ -115,31 +116,33 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 			return changed, nestedBefore, nestedAfter, nestedMask
 		}
 
-	case LinearizedArray:
-		if latest, ok := latestValue.(LinearizedArray); ok {
+	case LinearizedSlice:
+		if latest, ok := latestValue.(LinearizedSlice); ok {
 			// Compare arrays element by element
 			changed = false
 			maxLen := max(len(prev), len(latest))
-			mergedBefore := make(LinearizedArray, maxLen)
-			mergedAfter := make(LinearizedArray, maxLen)
+			mergedBefore := make(LinearizedSlice, maxLen)
+			mergedAfter := make(LinearizedSlice, maxLen)
 
 			for i := 0; i < maxLen; i++ {
+				key := int32(i)
 				var prevElem, latestElem any
 				if i < len(prev) {
-					prevElem = prev[i]
+					prevElem = prev[key]
 				}
 				if i < len(latest) {
-					latestElem = latest[i]
+					latestElem = latest[key]
 				}
 
 				// Compare elements
 				elemChanged, elemBefore, elemAfter, elemMask := compareValues(prevElem, latestElem)
-				mergedBefore[i] = elemBefore
-				mergedAfter[i] = elemAfter
+				mergedBefore[key] = elemBefore
+				mergedAfter[key] = elemAfter
 				if elemChanged {
 					changed = true
-					nestedMask.Values[int32(i)] = &UpdateMaskValue{
-						Value: &UpdateMaskValue_Multiple{Multiple: elemMask},
+					nestedMask.Values[int32(key)] = &UpdateMaskValue{
+						Op:    UpdateMaskOperation_UPDATE,
+						Masks: elemMask,
 					}
 				}
 			}
@@ -160,8 +163,8 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 				keySet[pair[0]] = struct{}{}
 			}
 
-			mergedBefore := LinearizedMap{}
-			mergedAfter := LinearizedMap{}
+			mergedBefore := make([][2]any, 0)
+			mergedAfter := make([][2]any, 0)
 
 			// Iterate over all keys
 			for key := range keySet {
@@ -192,7 +195,8 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 					mergedAfter[len(mergedAfter)-1] = [2]any{key, elemAfter}
 					if elemMask != nil {
 						nestedMask.Values[int32(key.(int))] = &UpdateMaskValue{
-							Value: &UpdateMaskValue_Multiple{Multiple: elemMask},
+							Op:    UpdateMaskOperation_UPDATE,
+							Masks: elemMask,
 						}
 					}
 				}
