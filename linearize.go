@@ -1,7 +1,6 @@
 package linearize
 
 import (
-	"errors"
 	"fmt"
 	"hash/crc32"
 	"reflect"
@@ -39,51 +38,73 @@ func Linearize(message proto.Message) (LinearizedObject, error) {
 		// Handle map fields
 		if fd.IsMap() {
 			mapValue := make(LinearizedMap)
-			// Sorting function that uses CRC32 hash values for non-sortable keys
-			value.Map().Range(func(mapKey protoreflect.MapKey, mapVal protoreflect.Value) bool {
-				// Create a slice to hold the keys and their corresponding CRC32 hash
-				type keyedValue struct {
-					Key   protoreflect.MapKey
-					CRC32 uint32
-				}
 
-				var keys []keyedValue
+			// Collect and sort keys by CRC32 hash for consistent order
+			type keyedValue struct {
+				Key   protoreflect.MapKey
+				CRC32 uint32
+			}
 
-				// Collect keys and compute CRC32 for each key
-				value.Map().Range(func(k protoreflect.MapKey, _ protoreflect.Value) bool {
-					hash := crc32.ChecksumIEEE([]byte(k.String()))
-					keys = append(keys, keyedValue{Key: k, CRC32: hash})
-					return true
-				})
-
-				// Sort the keys based on the CRC32 hash value
-				sort.Slice(keys, func(i, j int) bool {
-					return keys[i].CRC32 < keys[j].CRC32
-				})
-
-				// After sorting, extract the map values in sorted order
-				mapValue := make(LinearizedMap)
-				for _, kv := range keys {
-					mapValue[kv.Key.Interface()] = value.Map().Get(kv.Key).Interface()
-				}
-
-				// Return true to continue iteration (if needed)
+			var keys []keyedValue
+			value.Map().Range(func(k protoreflect.MapKey, _ protoreflect.Value) bool {
+				hash := crc32.ChecksumIEEE([]byte(k.String()))
+				keys = append(keys, keyedValue{Key: k, CRC32: hash})
 				return true
 			})
+
+			sort.Slice(keys, func(i, j int) bool {
+				return keys[i].CRC32 < keys[j].CRC32
+			})
+
+			for _, kv := range keys {
+				mapKey := kv.Key
+				mapVal := value.Map().Get(mapKey)
+
+				// Directly use the map key without linearization (it's a valid scalar or enum)
+				keyInterface := mapKey.Interface()
+
+				// Check if the map value is a message (i.e., needs linearization)
+				if mapVal.Message() != nil {
+					// Recursively linearize the nested message
+					nestedResult, err := Linearize(mapVal.Message().Interface().(proto.Message))
+					if err != nil {
+						return false
+					}
+					mapValue[keyInterface] = nestedResult
+				} else {
+					// Handle primitive types
+					mapValue[keyInterface] = mapVal.Interface()
+				}
+			}
+
 			linearized[key] = mapValue
 		} else if fd.IsList() {
 			// Handle repeated fields (lists)
 			var list LinearizedArray
 			for i := 0; i < value.List().Len(); i++ {
-				list = append(list, value.List().Get(i).Interface())
+				elem := value.List().Get(i)
+
+				if fd.Kind() == protoreflect.MessageKind {
+					// Recursively linearize nested message elements
+					nestedMessage, ok := elem.Message().Interface().(proto.Message)
+					if !ok {
+						return false // Ensure type assertion succeeded
+					}
+
+					nestedResult, err := Linearize(nestedMessage)
+					if err != nil {
+						return false
+					}
+					list = append(list, nestedResult)
+				} else {
+					// Append primitive types directly
+					list = append(list, elem.Interface())
+				}
 			}
 			linearized[key] = list
 		} else if fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind {
 			// Recursively handle nested messages
-			// Convert protoreflect.Message to proto.Message by calling its Interface() method
 			nestedMessage := value.Message().Interface()
-
-			// Now you can pass the nestedMessage to Linearize
 			nestedResult, err := Linearize(nestedMessage.(proto.Message))
 			if err != nil {
 				return false
@@ -279,26 +300,13 @@ func Merge(updateMask []*UpdateMask, previous LinearizedObject, latest Linearize
 }
 
 // Unlinearize function for decoding LinearizedObject into the correct struct type
-func Unlinearize[T proto.Message](m LinearizedObject) (T, error) {
-	var result T
+func Unlinearize(m LinearizedObject, message proto.Message) error {
 
-	// Ensure result is a pointer to a struct
-	if reflect.TypeOf(result).Kind() != reflect.Ptr {
-		return result, errors.New("result must be a pointer to a struct")
+	v := reflect.ValueOf(message)
+	if v.Kind() != reflect.Ptr || v.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("result must be a pointer to a struct")
 	}
-
-	// Initialize the result as a pointer if it's nil
-	if reflect.ValueOf(result).IsNil() {
-		// Create a new instance of the struct T (a pointer to it)
-		result = reflect.New(reflect.TypeOf(result).Elem()).Interface().(T)
-	}
-
-	// Recursively unlinearize the struct fields
-	if err := unlinearizeStruct(reflect.ValueOf(result).Elem(), m); err != nil {
-		return result, err
-	}
-
-	return result, nil
+	return unlinearizeStruct(v.Elem(), m)
 }
 
 func unlinearizeStruct(v reflect.Value, data LinearizedObject) error {
@@ -346,9 +354,47 @@ func unlinearizeStruct(v reflect.Value, data LinearizedObject) error {
 			if field.IsNil() {
 				field.Set(reflect.MakeSlice(field.Type(), len(value), len(value)))
 			}
-			sliceValue := field
-			for i, elem := range value {
-				sliceValue.Index(i).Set(reflect.ValueOf(elem))
+
+			// Iterate over the LinearizedArray elements
+			for j, elem := range value {
+				elemValue := field.Index(j)
+
+				if elemStruct, ok := elem.(LinearizedObject); ok {
+					// Handle struct or pointer to struct
+					if elemValue.Kind() == reflect.Ptr {
+						// Initialize pointer if nil
+						if elemValue.IsNil() {
+							elemValue.Set(reflect.New(elemValue.Type().Elem()))
+						}
+						// Recursively populate the struct
+						if err := unlinearizeStruct(elemValue.Elem(), elemStruct); err != nil {
+							return fmt.Errorf("failed to unlinearize struct in slice at index %d: %w", j, err)
+						}
+					} else if elemValue.Kind() == reflect.Struct {
+						// Directly populate the struct
+						if err := unlinearizeStruct(elemValue, elemStruct); err != nil {
+							return fmt.Errorf("failed to unlinearize struct in slice at index %d: %w", j, err)
+						}
+					} else {
+						return fmt.Errorf("unsupported slice element type at index %d: %s", j, elemValue.Kind())
+					}
+				} else {
+					// Handle primitive or non-struct types
+					actualValue := reflect.ValueOf(elem)
+
+					// Attempt conversion if necessary
+					if !actualValue.Type().AssignableTo(elemValue.Type()) {
+						convertedValue := actualValue.Convert(elemValue.Type())
+						if convertedValue.IsValid() {
+							elemValue.Set(convertedValue)
+						} else {
+							return fmt.Errorf("type mismatch in slice at index %d: expected %s but got %s", j, elemValue.Type(), actualValue.Type())
+						}
+					} else {
+						// Set the value directly if assignable
+						elemValue.Set(actualValue)
+					}
+				}
 			}
 
 		case LinearizedMap:

@@ -18,3 +18,10 @@ message Complex {
   map<string, Simple> Map = 5;
 }
 
+message SuperComplex {
+  string Field1 = 1;
+  int32 Field2 = 2;
+  Complex Nested = 3;
+  repeated Complex Repeated = 4;
+  map<int32, Complex> Map = 5;
+}
