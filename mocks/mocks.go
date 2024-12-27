@@ -39,31 +39,19 @@ func CreateSuperComplexMessage() *SuperComplex {
 				Field2:   100,
 				Repeated: []string{"nested_item1", "nested_item2"},
 			},
-			Repeated: []Simple{
+			Repeated: []*Simple{
 				{
 					Field1:   "complex_repeated_field1",
 					Field2:   50,
 					Repeated: []string{"item1", "item2"},
 				},
 			},
-			Map: map[int32]*Complex{
-				1: {
-					Field1: "map_field1",
-					Field2: 300,
-					Nested: &Simple{
-						Field1: "map_nested_field1",
-						Field2: 10,
-					},
-					Repeated: []Simple{
-						{
-							Field1: "map_repeated_field1",
-							Field2: 5,
-						},
-					},
-				},
+			Map: map[string]*Simple{
+				"key1": CreateSimpleMessage(),
+				"key2": CreateSimpleMessage(),
 			},
 		},
-		Repeated: []Complex{
+		Repeated: []*Complex{
 			{
 				Field1: "complex_repeated_field2",
 				Field2: 150,
@@ -71,7 +59,7 @@ func CreateSuperComplexMessage() *SuperComplex {
 					Field1: "nested_repeated_field2",
 					Field2: 200,
 				},
-				Repeated: []Simple{
+				Repeated: []*Simple{
 					{
 						Field1: "complex_repeated_item1",
 						Field2: 50,
@@ -87,7 +75,7 @@ func CreateSuperComplexMessage() *SuperComplex {
 					Field1: "map_nested_field2",
 					Field2: 30,
 				},
-				Repeated: []Simple{
+				Repeated: []*Simple{
 					{
 						Field1: "complex_map_repeated_field2",
 						Field2: 20,
