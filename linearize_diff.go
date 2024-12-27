@@ -166,21 +166,18 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 			// Iterate over all keys
 			for key := range keySet {
 				var prevVal, latestVal any
-				var prevKey, latestKey any
-				// Find the previous value for this key
+				// Get the previous value for the current key
 				for _, pair := range prev {
 					if pair[0] == key {
 						prevVal = pair[1]
-						prevKey = pair[0]
 						mergedBefore = append(mergedBefore, pair)
 						break
 					}
 				}
-				// Find the latest value for this key
+				// Get the latest value for the current key
 				for _, pair := range latest {
 					if pair[0] == key {
 						latestVal = pair[1]
-						latestKey = pair[0]
 						mergedAfter = append(mergedAfter, pair)
 						break
 					}
@@ -190,13 +187,14 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 				elemChanged, elemBefore, elemAfter, elemMask := compareValues(prevVal, latestVal)
 				if elemChanged {
 					changed = true
-					// Store before and after states correctly
-					nestedMask.Values[int32(key.(int))] = &UpdateMaskValue{
-						Value: &UpdateMaskValue_Multiple{Multiple: elemMask},
+					// Store the before and after states correctly
+					mergedBefore[len(mergedBefore)-1] = [2]any{key, elemBefore}
+					mergedAfter[len(mergedAfter)-1] = [2]any{key, elemAfter}
+					if elemMask != nil {
+						nestedMask.Values[int32(key.(int))] = &UpdateMaskValue{
+							Value: &UpdateMaskValue_Multiple{Multiple: elemMask},
+						}
 					}
-					// Ensure the correct before and after values are added
-					mergedBefore = append(mergedBefore, [2]any{prevKey, elemBefore})
-					mergedAfter = append(mergedAfter, [2]any{latestKey, elemAfter})
 				}
 			}
 			return changed, mergedBefore, mergedAfter, nestedMask
