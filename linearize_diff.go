@@ -120,32 +120,47 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 		if latest, ok := latestValue.(LinearizedSlice); ok {
 			// Compare arrays element by element
 			changed = false
-			maxLen := max(len(prev), len(latest))
+			prevLen := len(prev)
+			latestLen := len(latest)
+
+			maxLen := max(prevLen, latestLen)
 			mergedBefore := make(LinearizedSlice, maxLen)
 			mergedAfter := make(LinearizedSlice, maxLen)
 
 			for i := 0; i < maxLen; i++ {
 				key := int32(i)
+
 				var prevElem, latestElem any
-				if i < len(prev) {
+				if i < prevLen {
 					prevElem = prev[key]
 				}
-				if i < len(latest) {
+				if i < latestLen {
 					latestElem = latest[key]
 				}
 
 				// Compare elements
 				elemChanged, elemBefore, elemAfter, elemMask := compareValues(prevElem, latestElem)
 				mergedBefore[key] = elemBefore
-				mergedAfter[key] = elemAfter
 				if elemChanged {
 					changed = true
+
+					if latestLen < prevLen {
+						if i >= prevLen-1 {
+							changed = true
+							nestedMask.Values[int32(key)] = &UpdateMaskValue{
+								Op: UpdateMaskOperation_REMOVE,
+							}
+							continue
+						}
+					}
+					mergedAfter[key] = elemAfter
 					nestedMask.Values[int32(key)] = &UpdateMaskValue{
 						Op:    UpdateMaskOperation_UPDATE,
 						Masks: elemMask,
 					}
 				}
 			}
+
 			return changed, mergedBefore, mergedAfter, nestedMask
 		}
 

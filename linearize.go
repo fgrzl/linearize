@@ -2,7 +2,6 @@ package linearize
 
 import (
 	"fmt"
-	"hash/crc32"
 	"reflect"
 	"sort"
 
@@ -30,30 +29,27 @@ func Linearize(message proto.Message) (LinearizedObject, error) {
 		if fd.IsMap() {
 			mapValue := make(LinearizedMap, 0)
 
-			// Collect and sort keys by CRC32 hash for consistent order
+			// Collect keys to sort them lexicographically
 			type keyedValue struct {
 				Key   protoreflect.MapKey
-				CRC32 uint32
+				Value protoreflect.Value
 			}
 
 			var keys []keyedValue
-			value.Map().Range(func(k protoreflect.MapKey, _ protoreflect.Value) bool {
-				hash := crc32.ChecksumIEEE([]byte(k.String()))
-				keys = append(keys, keyedValue{Key: k, CRC32: hash})
+			value.Map().Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
+				keys = append(keys, keyedValue{Key: k, Value: v})
 				return true
 			})
 
-			// Sort by CRC32 hash to ensure consistent ordering
-			sort.Slice(keys, func(i, j int) bool {
-				return keys[i].CRC32 < keys[j].CRC32
+			// Sort keys lexicographically
+			sort.SliceStable(keys, func(i, j int) bool {
+				return keys[i].Key.String() < keys[j].Key.String()
 			})
 
+			// Process the sorted keys and their values
 			for _, kv := range keys {
-				mapKey := kv.Key
-				mapVal := value.Map().Get(mapKey)
-
-				// Directly use the map key without linearization (it's a valid scalar or enum)
-				keyInterface := mapKey.Interface()
+				mapKey := kv.Key.Interface()
+				mapVal := kv.Value
 
 				// Check if the map value is a message (i.e., needs linearization)
 				if mapVal.Message() != nil {
@@ -62,10 +58,10 @@ func Linearize(message proto.Message) (LinearizedObject, error) {
 					if err != nil {
 						return false
 					}
-					mapValue[int32(len(mapValue))] = [2]any{keyInterface, nestedResult}
+					mapValue[int32(len(mapValue))] = [2]any{mapKey, nestedResult}
 				} else {
 					// Handle primitive types
-					mapValue[int32(len(mapValue))] = [2]any{keyInterface, mapVal.Interface()}
+					mapValue[int32(len(mapValue))] = [2]any{mapKey, mapVal.Interface()}
 				}
 			}
 
