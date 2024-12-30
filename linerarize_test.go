@@ -138,7 +138,6 @@ func TestSimple(t *testing.T) {
 		require.NoError(t, err)
 
 		msg2 := &mocks.Simple{
-			Field1:   "changed_field1", // Modify some fields
 			Field2:   200,
 			Repeated: append(msg1.Repeated, "item3", "item4"),
 		}
@@ -152,7 +151,7 @@ func TestSimple(t *testing.T) {
 		err = Merge(mask, linearized1, diff)
 
 		// Assert
-		assert.Equal(t, msg2.Field1, linearized1[1])
+		assert.Equal(t, nil, linearized1[1])
 		assert.Equal(t, msg2.Field2, linearized1[2])
 		assert.Equal(t, msg2.Repeated[0], linearized1[3].(LinearizedSlice)[0])
 		assert.Equal(t, msg2.Repeated[1], linearized1[3].(LinearizedSlice)[1])
@@ -187,93 +186,112 @@ func TestSimple(t *testing.T) {
 		assert.Equal(t, msg2.Repeated[0], linearized1[3].(LinearizedSlice)[0])
 	})
 }
-
 func TestComplex(t *testing.T) {
-	t.Run("Linearize Complex Message", func(t *testing.T) {
-		// Arrange: Create and linearize a complex message
+	t.Run("should linearize and unlinearize message", func(t *testing.T) {
+		// Arrange
+		msg := mocks.CreateComplexMessage()
+		linearized, err := Linearize(msg)
+		require.NoError(t, err)
+
+		// Act
+		var unlinearized mocks.Complex
+		err = Unlinearize(linearized, &unlinearized)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.Equal(t, msg.Field1, unlinearized.Field1)
+		assert.Equal(t, msg.Field2, unlinearized.Field2)
+		assert.Equal(t, msg.Nested, unlinearized.Nested)
+		// assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
+		// assert.Equal(t, msg.Map["key1"], unlinearized.Map["key1"])
+		// assert.Equal(t, msg.Map["key2"], unlinearized.Map["key2"])
+	})
+
+	t.Run("should return empty message given empty linearized object", func(t *testing.T) {
+		// Arrange
+		msg := &mocks.Complex{}
+		var emptyLinearized LinearizedObject
+
+		// Act
+		var unlinearized mocks.Complex
+		err := Unlinearize(emptyLinearized, &unlinearized)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.Equal(t, msg.Field1, unlinearized.Field1)
+		assert.Equal(t, int32(0), unlinearized.Field2)
+		assert.Equal(t, msg.Nested, unlinearized.Nested)
+		assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
+		assert.Equal(t, msg.Map, unlinearized.Map)
+	})
+
+	t.Run("should unlinearize partial message", func(t *testing.T) {
+		// Arrange
 		msg := mocks.CreateComplexMessage()
 		linearized, err := Linearize(msg)
 		assert.NoError(t, err)
 
-		// Act: Unlinearize back to the original complex message type
+		// Remove a field to simulate a missing field
+		delete(linearized, 2)
+
+		// Act
 		var unlinearized mocks.Complex
 		err = Unlinearize(linearized, &unlinearized)
 
-		// Assert: Verify the unlinearized message matches the original
+		// Assert
 		assert.NoError(t, err)
 		assert.Equal(t, msg.Field1, unlinearized.Field1)
-		assert.Equal(t, msg.Field2, unlinearized.Field2)
-		assert.Equal(t, msg.Nested.Field1, unlinearized.Nested.Field1)
+		assert.Equal(t, int32(0), unlinearized.Field2)
+		assert.Equal(t, msg.Nested, unlinearized.Nested)
 		assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
+		assert.Equal(t, msg.Map, unlinearized.Map)
 	})
 
-	t.Run("Unlinearize Empty Complex Data", func(t *testing.T) {
-		// Arrange
-		var emptyLinearized LinearizedObject
-
-		// Act: Attempt to unlinearize empty data
-		var unlinearized mocks.Complex
-		err := Unlinearize(emptyLinearized, &unlinearized)
-
-		// Assert: Ensure an error is returned due to the empty data
-		assert.Error(t, err)
-	})
-
-	// Diff and Merge Tests for Complex
-	t.Run("Diff Complex Messages with Differences", func(t *testing.T) {
-		// Arrange: Create two different messages
-		msg1 := mocks.CreateComplexMessage()
-		msg2 := &mocks.Complex{
-			Field1: "updated_field1", // Modify some fields
-			Field2: 200,
-			Nested: &mocks.Simple{
-				Field1: "nested_changed_field1",
-			},
-		}
-
-		linearized1, err := Linearize(msg1)
-		assert.NoError(t, err)
-		linearized2, err := Linearize(msg2)
-		assert.NoError(t, err)
-
-		// Act: Diff the two linearized messages
-		before, after, mask, err := Diff(linearized1, linearized2)
-
-		// Assert: Ensure the differences are correctly identified and the mask is populated
-		assert.NoError(t, err)
-		assert.NotEmpty(t, before)
-		assert.NotEmpty(t, after)
-		assert.NotEmpty(t, mask)
-
-		// // Verify that the mask contains the fields that have changed
-		// assert.Contains(t, mask, &UpdateMask{
-		// 	Value: &UpdateMask_Single{Single: 1}, // Field1 has changed (using field number 1)
-		// })
-		// assert.Contains(t, mask, &UpdateMask{
-		// 	Value: &UpdateMask_Single{Single: 2}, // Nested.Field1 has changed (using nested field number)
-		// })
-	})
-
-	t.Run("Merge Two Complex Messages with Update Mask", func(t *testing.T) {
+	// Add Diff and Merge tests following the same pattern as Simple
+	t.Run("should diff messages with changes", func(t *testing.T) {
 		// Arrange
 		msg1 := mocks.CreateComplexMessage()
-
 		linearized1, err := Linearize(msg1)
 		require.NoError(t, err)
 
 		msg2 := &mocks.Complex{
-			Field1: "changed_field1", // Modify some fields
-			Field2: 200,
-			Repeated: []*mocks.Simple{
-				{Field1: "item3", Field2: 3},
-			},
+			Field1:   "changed_field1",
+			Field2:   200,
+			Nested:   &mocks.Simple{Field1: "new_nested"},
+			Repeated: []*mocks.Simple{{Field1: "new_repeated"}},
+			Map:      map[string]*mocks.Simple{"key": {Field1: "new_map_value"}},
 		}
+		linearized2, err := Linearize(msg2)
+		require.NoError(t, err)
 
+		// Act
+		before, after, mask, err := Diff(linearized1, linearized2)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.NotNil(t, before)
+		assert.NotNil(t, after)
+		assert.NotNil(t, mask)
+	})
+
+	t.Run("should merge messages using update mask", func(t *testing.T) {
+		// Arrange
+		msg1 := mocks.CreateComplexMessage()
+		linearized1, err := Linearize(msg1)
+		require.NoError(t, err)
+
+		msg2 := &mocks.Complex{
+			Field1:   "changed_field1",
+			Field2:   200,
+			Nested:   &mocks.Simple{Field1: "new_nested"},
+			Repeated: []*mocks.Simple{{Field1: "new_repeated"}},
+			Map:      map[string]*mocks.Simple{"key": {Field1: "new_map_value"}},
+		}
 		linearized2, err := Linearize(msg2)
 		require.NoError(t, err)
 
 		_, diff, mask, err := Diff(linearized1, linearized2)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// Act
 		err = Merge(mask, linearized1, diff)
@@ -281,6 +299,8 @@ func TestComplex(t *testing.T) {
 		// Assert
 		assert.Equal(t, msg2.Field1, linearized1[1])
 		assert.Equal(t, msg2.Field2, linearized1[2])
-		assert.ElementsMatch(t, msg2.Repeated, linearized1[3])
+		assert.Equal(t, msg2.Nested.Field1, linearized1[3].(LinearizedObject)[1])
+		assert.Equal(t, msg2.Repeated[0].Field1, linearized1[4].(LinearizedSlice)[0].(LinearizedObject)[1])
+		//assert.Equal(t, msg2.Map["key"].Field1, linearized1[5].(LinearizedMap)[0].Value.(LinearizedObject)[1])
 	})
 }

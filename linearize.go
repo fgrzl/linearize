@@ -110,47 +110,38 @@ func Linearize(message proto.Message) (LinearizedObject, error) {
 	return linearized, nil
 }
 
-// Unlinearize function for decoding LinearizedObject into the correct struct type
+// Updated Unlinearize function
 func Unlinearize(m LinearizedObject, message proto.Message) error {
-	// Ensure the message is a pointer to a struct
 	v := reflect.ValueOf(message)
 	if v.Kind() != reflect.Ptr || v.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("result must be a pointer to a struct")
 	}
 
-	// Get the message descriptor for the Protobuf message
 	msgReflect := message.ProtoReflect().Descriptor()
-
-	// Call the recursive unlinearize function with the message descriptor
-	return unlinearizeStruct(v.Elem(), m, msgReflect)
+	elem := v.Elem()
+	return unlinearizeStruct(elem, m, msgReflect)
 }
 
+// Recursive function to unlinearize structs
 func unlinearizeStruct(v reflect.Value, data LinearizedObject, msgReflect protoreflect.MessageDescriptor) error {
-	// Iterate through the LinearizedObject by position and set the corresponding fields in the struct
 	for i, d := range data {
 		fd := msgReflect.Fields().ByNumber(protoreflect.FieldNumber(i))
 		if fd == nil {
 			return fmt.Errorf("field number %d not found in the message", i)
 		}
 
-		// Get the field name and number for correct mapping
 		fieldName := string(fd.Name())
-
-		// Find the struct field corresponding to this descriptor
 		field := v.FieldByName(fieldName)
 		if !field.IsValid() {
 			return fmt.Errorf("invalid field name: %s", fieldName)
 		}
 
-		// Ensure the field is addressable (can be set)
 		if !field.CanSet() {
 			return fmt.Errorf("field %s cannot be set", fieldName)
 		}
 
-		// Handle the field depending on its type
 		switch value := d.(type) {
 		case LinearizedObject:
-			// Handle nested struct (LinearizedObject is a map of field numbers)
 			if field.Kind() == reflect.Ptr {
 				if field.IsNil() {
 					field.Set(reflect.New(field.Type().Elem()))
@@ -158,82 +149,70 @@ func unlinearizeStruct(v reflect.Value, data LinearizedObject, msgReflect protor
 				field = field.Elem()
 			}
 			if err := unlinearizeStruct(field, value, fd.Message()); err != nil {
-				return err
+				return fmt.Errorf("failed to unlinearize nested field %s: %w", fieldName, err)
 			}
 
 		case LinearizedSlice:
-			// Handle repeated fields (slices)
 			if field.Kind() != reflect.Slice {
-				return fmt.Errorf("expected slice field %s, but got %s", fieldName, field.Kind())
+				return fmt.Errorf("expected slice for field %s but got %s", fieldName, field.Kind())
 			}
-			if field.IsNil() {
-				field.Set(reflect.MakeSlice(field.Type(), len(value), len(value)))
-			}
-
-			// Iterate over the LinearizedArray elements
+			field.Set(reflect.MakeSlice(field.Type(), len(value), len(value)))
 			for j, elem := range value {
 				elemValue := field.Index(int(j))
-
-				if elemStruct, ok := elem.(LinearizedObject); ok {
-					// Handle struct or pointer to struct
-					if elemValue.Kind() == reflect.Ptr {
-						// Initialize pointer if nil
-						if elemValue.IsNil() {
-							elemValue.Set(reflect.New(elemValue.Type().Elem()))
-						}
-						// Recursively populate the struct
-						if err := unlinearizeStruct(elemValue.Elem(), elemStruct, msgReflect); err != nil {
-							return fmt.Errorf("failed to unlinearize struct in slice at index %d: %w", j, err)
-						}
-					} else if elemValue.Kind() == reflect.Struct {
-						// Directly populate the struct
-						if err := unlinearizeStruct(elemValue, elemStruct, msgReflect); err != nil {
-							return fmt.Errorf("failed to unlinearize struct in slice at index %d: %w", j, err)
-						}
-					} else {
-						return fmt.Errorf("unsupported slice element type at index %d: %s", j, elemValue.Kind())
-					}
-				} else {
-					// Handle primitive or non-struct types
-					actualValue := reflect.ValueOf(elem)
-
-					// Attempt conversion if necessary
-					if !actualValue.Type().AssignableTo(elemValue.Type()) {
-						convertedValue := actualValue.Convert(elemValue.Type())
-						if convertedValue.IsValid() {
-							elemValue.Set(convertedValue)
-						} else {
-							return fmt.Errorf("type mismatch in slice at index %d: expected %s but got %s", j, elemValue.Type(), actualValue.Type())
-						}
-					} else {
-						// Set the value directly if assignable
-						elemValue.Set(actualValue)
-					}
+				if err := unlinearizeValue(elemValue, elem, fd); err != nil {
+					return fmt.Errorf("failed to set slice element at index %d: %w", j, err)
 				}
 			}
 
 		case LinearizedMap:
-			// Handle map fields
 			if field.Kind() != reflect.Map {
-				return fmt.Errorf("expected map field %s, but got %s", fieldName, field.Kind())
+				return fmt.Errorf("expected map for field %s but got %s", fieldName, field.Kind())
 			}
-			// Initialize the map if it's a pointer and nil
-			if field.Kind() == reflect.Ptr && field.IsNil() {
-				field.Set(reflect.New(field.Type().Elem()))
-			}
-			mapValue := field
-			for mapKey, mapVal := range value {
-				mapValue.SetMapIndex(reflect.ValueOf(mapKey), reflect.ValueOf(mapVal))
+			field.Set(reflect.MakeMap(field.Type()))
+			for _, mapVal := range value {
+				kv := mapVal
+				key := reflect.ValueOf(kv[0]).Convert(field.Type().Key())
+				val := reflect.New(field.Type().Elem()).Elem()
+				if err := unlinearizeValue(val, kv[1], fd); err != nil {
+					return fmt.Errorf("failed to set map value for key %v: %w", key, err)
+				}
+				field.SetMapIndex(key, val)
 			}
 
 		default:
-			// Handle primitive fields
-			if field.Kind() != reflect.TypeOf(value).Kind() {
-				return fmt.Errorf("expected %s field %s, but got %s", reflect.TypeOf(value).Kind(), fieldName, field.Kind())
+			if err := unlinearizeValue(field, value, fd); err != nil {
+				return fmt.Errorf("failed to set field %s: %w", fieldName, err)
 			}
-			field.Set(reflect.ValueOf(value))
 		}
 	}
+	return nil
+}
 
+// Helper to unlinearize a single value
+func unlinearizeValue(field reflect.Value, value any, fd protoreflect.FieldDescriptor) error {
+	switch fd.Kind() {
+	case protoreflect.MessageKind:
+		// Ensure the field is settable and is a pointer
+		if field.Kind() != reflect.Ptr {
+			return fmt.Errorf("expected pointer to a message, but got %s", field.Kind())
+		}
+
+		// Create a new instance if the pointer is nil
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+
+		// Recursively unlinearize the nested message
+		nestedMessage := field.Interface().(proto.Message)
+		return Unlinearize(value.(LinearizedObject), nestedMessage)
+
+	default:
+		// Handle primitive fields
+		actualValue := reflect.ValueOf(value)
+		if !actualValue.Type().AssignableTo(field.Type()) {
+			return fmt.Errorf("type mismatch: expected %s but got %s", field.Type(), actualValue.Type())
+		}
+		field.Set(actualValue)
+	}
 	return nil
 }
