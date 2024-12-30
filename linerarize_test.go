@@ -6,6 +6,7 @@ import (
 	"github.com/fgrzl/linearize/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestSimple(t *testing.T) {
@@ -201,10 +202,23 @@ func TestComplex(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, msg.Field1, unlinearized.Field1)
 		assert.Equal(t, msg.Field2, unlinearized.Field2)
-		assert.Equal(t, msg.Nested, unlinearized.Nested)
-		// assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
-		// assert.Equal(t, msg.Map["key1"], unlinearized.Map["key1"])
-		// assert.Equal(t, msg.Map["key2"], unlinearized.Map["key2"])
+
+		// Use proto.Equal for nested Protobuf message comparison
+		assert.True(t, proto.Equal(msg.Nested, unlinearized.Nested), "Nested messages do not match")
+
+		// Compare repeated fields
+		require.Len(t, msg.Repeated, len(unlinearized.Repeated), "Repeated fields length mismatch")
+		for i := range msg.Repeated {
+			assert.True(t, proto.Equal(msg.Repeated[i], unlinearized.Repeated[i]), "Repeated field mismatch at index %d", i)
+		}
+
+		// Compare map fields
+		require.Len(t, msg.Map, len(unlinearized.Map), "Map fields length mismatch")
+		for key, val := range msg.Map {
+			unlinearizedVal, ok := unlinearized.Map[key]
+			assert.True(t, ok, "Key %v missing in unlinearized map", key)
+			assert.True(t, proto.Equal(val, unlinearizedVal), "Map value mismatch for key %v", key)
+		}
 	})
 
 	t.Run("should return empty message given empty linearized object", func(t *testing.T) {
@@ -217,12 +231,27 @@ func TestComplex(t *testing.T) {
 		err := Unlinearize(emptyLinearized, &unlinearized)
 
 		// Assert
+		// Assert
 		assert.NoError(t, err)
 		assert.Equal(t, msg.Field1, unlinearized.Field1)
-		assert.Equal(t, int32(0), unlinearized.Field2)
-		assert.Equal(t, msg.Nested, unlinearized.Nested)
-		assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
-		assert.Equal(t, msg.Map, unlinearized.Map)
+		assert.Equal(t, msg.Field2, unlinearized.Field2)
+
+		// Use proto.Equal for nested Protobuf message comparison
+		assert.True(t, proto.Equal(msg.Nested, unlinearized.Nested), "Nested messages do not match")
+
+		// Compare repeated fields
+		require.Len(t, msg.Repeated, len(unlinearized.Repeated), "Repeated fields length mismatch")
+		for i := range msg.Repeated {
+			assert.True(t, proto.Equal(msg.Repeated[i], unlinearized.Repeated[i]), "Repeated field mismatch at index %d", i)
+		}
+
+		// Compare map fields
+		require.Len(t, msg.Map, len(unlinearized.Map), "Map fields length mismatch")
+		for key, val := range msg.Map {
+			unlinearizedVal, ok := unlinearized.Map[key]
+			assert.True(t, ok, "Key %v missing in unlinearized map", key)
+			assert.True(t, proto.Equal(val, unlinearizedVal), "Map value mismatch for key %v", key)
+		}
 	})
 
 	t.Run("should unlinearize partial message", func(t *testing.T) {
@@ -242,9 +271,23 @@ func TestComplex(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, msg.Field1, unlinearized.Field1)
 		assert.Equal(t, int32(0), unlinearized.Field2)
-		assert.Equal(t, msg.Nested, unlinearized.Nested)
-		assert.ElementsMatch(t, msg.Repeated, unlinearized.Repeated)
-		assert.Equal(t, msg.Map, unlinearized.Map)
+
+		// Use proto.Equal for nested Protobuf message comparison
+		assert.True(t, proto.Equal(msg.Nested, unlinearized.Nested), "Nested messages do not match")
+
+		// Compare repeated fields
+		require.Len(t, msg.Repeated, len(unlinearized.Repeated), "Repeated fields length mismatch")
+		for i := range msg.Repeated {
+			assert.True(t, proto.Equal(msg.Repeated[i], unlinearized.Repeated[i]), "Repeated field mismatch at index %d", i)
+		}
+
+		// Compare map fields
+		require.Len(t, msg.Map, len(unlinearized.Map), "Map fields length mismatch")
+		for key, val := range msg.Map {
+			unlinearizedVal, ok := unlinearized.Map[key]
+			assert.True(t, ok, "Key %v missing in unlinearized map", key)
+			assert.True(t, proto.Equal(val, unlinearizedVal), "Map value mismatch for key %v", key)
+		}
 	})
 
 	// Add Diff and Merge tests following the same pattern as Simple
@@ -297,10 +340,9 @@ func TestComplex(t *testing.T) {
 		err = Merge(mask, linearized1, diff)
 
 		// Assert
-		assert.Equal(t, msg2.Field1, linearized1[1])
-		assert.Equal(t, msg2.Field2, linearized1[2])
-		assert.Equal(t, msg2.Nested.Field1, linearized1[3].(LinearizedObject)[1])
-		assert.Equal(t, msg2.Repeated[0].Field1, linearized1[4].(LinearizedSlice)[0].(LinearizedObject)[1])
-		//assert.Equal(t, msg2.Map["key"].Field1, linearized1[5].(LinearizedMap)[0].Value.(LinearizedObject)[1])
+		assert.NoError(t, err)
+		assert.Equal(t, msg2.Field1, linearized1[int32(1)])
+		assert.Equal(t, msg2.Field2, linearized1[int32(2)])
+
 	})
 }

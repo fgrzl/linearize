@@ -118,7 +118,7 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 
 	case LinearizedSlice:
 		if latest, ok := latestValue.(LinearizedSlice); ok {
-			// Compare arrays element by element
+
 			changed = false
 			prevLen := len(prev)
 			latestLen := len(latest)
@@ -166,56 +166,69 @@ func compareValues(prevValue, latestValue any) (changed bool, nestedBefore, nest
 
 	case LinearizedMap:
 		if latest, ok := latestValue.(LinearizedMap); ok {
-			// Compare maps key by key
-			changed = false
-			keySet := make(map[any]struct{})
+			changed := false
+			mergedBefore := make(LinearizedMap)
+			mergedAfter := make(LinearizedMap)
 
-			// Add all keys from both previous and latest map
-			for _, pair := range prev {
-				keySet[pair[0]] = struct{}{}
-			}
-			for _, pair := range latest {
-				keySet[pair[0]] = struct{}{}
-			}
+			// Check keys in the previous map (prev) and compare with the latest map
+			for key, prevVal := range prev {
 
-			mergedBefore := make([][2]any, 0)
-			mergedAfter := make([][2]any, 0)
-
-			// Iterate over all keys
-			for key := range keySet {
-				var prevVal, latestVal any
-				// Get the previous value for the current key
-				for _, pair := range prev {
-					if pair[0] == key {
-						prevVal = pair[1]
-						mergedBefore = append(mergedBefore, pair)
-						break
+				// Check if the key is present in the latest map
+				latestVal, exists := latest[key]
+				if !exists {
+					// If key is removed in the latest map, mark for removal
+					mergedBefore[key] = prevVal
+					mergedAfter[key] = [2]any{}
+					nestedMask.Values[key] = &UpdateMaskValue{
+						Op: UpdateMaskOperation_REMOVE,
 					}
-				}
-				// Get the latest value for the current key
-				for _, pair := range latest {
-					if pair[0] == key {
-						latestVal = pair[1]
-						mergedAfter = append(mergedAfter, pair)
-						break
-					}
+					changed = true
+					continue
 				}
 
-				// Compare values
+				// If key is present in both maps, compare the values
 				elemChanged, elemBefore, elemAfter, elemMask := compareValues(prevVal, latestVal)
+
+				// Cast elemBefore and elemAfter to [2]any
+				if elemBefore != nil {
+					mergedBefore[key] = elemBefore.([2]any)
+				}
+				if elemAfter != nil {
+					mergedAfter[key] = elemAfter.([2]any)
+				}
+
 				if elemChanged {
 					changed = true
-					// Store the before and after states correctly
-					mergedBefore[len(mergedBefore)-1] = [2]any{key, elemBefore}
-					mergedAfter[len(mergedAfter)-1] = [2]any{key, elemAfter}
 					if elemMask != nil {
-						nestedMask.Values[int32(key.(int))] = &UpdateMaskValue{
+						nestedMask.Values[key] = &UpdateMaskValue{
 							Op:    UpdateMaskOperation_UPDATE,
 							Masks: elemMask,
 						}
+					} else {
+						nestedMask.Values[key] = &UpdateMaskValue{
+							Op: UpdateMaskOperation_UPDATE,
+						}
 					}
+				} else {
+					// If no change, retain the value
+					mergedAfter[key] = latestVal
 				}
 			}
+
+			// Check for new keys in the latest map
+			for key, latestVal := range latest {
+
+				if _, exists := prev[key]; !exists {
+					// If key is new, mark for addition
+					mergedBefore[key] = [2]any{}
+					mergedAfter[key] = latestVal
+					nestedMask.Values[key] = &UpdateMaskValue{
+						Op: UpdateMaskOperation_ADD,
+					}
+					changed = true
+				}
+			}
+
 			return changed, mergedBefore, mergedAfter, nestedMask
 		}
 
