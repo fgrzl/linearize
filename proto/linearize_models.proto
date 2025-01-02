@@ -1,10 +1,8 @@
 syntax = "proto3";
 
-
 package linearize;
 
 option go_package = "github.com/fgrzl/linearize"; 
-
 
 message UpdateMask {
   map<int32, UpdateMaskValue> values = 1;
